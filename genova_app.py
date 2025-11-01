@@ -1,27 +1,26 @@
 import os
+import requests
 import streamlit as st
 from groq import Groq
-import replicate
+from PIL import Image
+from io import BytesIO
 
 # ---------- НАСТРОЙКА СТРАНИЦЫ ----------
 st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
 
 # ---------- КЛЮЧИ ----------
 GROQ_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
-REPLICATE_TOKEN = st.secrets.get("REPLICATE_API_TOKEN", os.getenv("REPLICATE_API_TOKEN", ""))
 
-# Проверки ключей
+# Проверка
 if not GROQ_KEY:
     st.warning("⚠️ Не найден GROQ_API_KEY. Добавь его в Secrets, иначе текстовая генерация не заработает.")
-if not REPLICATE_TOKEN:
-    st.info("ℹ️ REPLICATE_API_TOKEN не задан — генерация изображений может не работать.")
 
 # ---------- КЛИЕНТЫ ----------
 groq_client = Groq(api_key=GROQ_KEY)
 
 # ---------- UI ----------
 st.title("🧠 Genova — AI помощник для соцсетей (бесплатная версия)")
-st.markdown("Текст — **Groq (LLaMA 3.3 70B)**, Изображения — **Flux Schnell (Replicate)**.")
+st.markdown("Текст — **Groq (LLaMA / Mixtral)**, Изображения — **Stable Diffusion 2.1 (бесплатно через Hugging Face)**.")
 
 col1, col2 = st.columns([2, 1])
 with col1:
@@ -34,8 +33,13 @@ with col2:
     llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma-7b-it"])
 
 st.markdown("### 🎨 Визуал")
-gen_image = st.checkbox("Сгенерировать изображение (Flux Schnell)")
+gen_image = st.checkbox("Сгенерировать изображение (💸 бесплатно через Hugging Face)")
 image_prompt = st.text_input("Описание изображения (если пусто — возьмём тему поста)", value="")
+
+format_choice = st.selectbox(
+    "🖼 Формат изображения",
+    ["Квадрат (512x512)", "Вертикальный (512x768)", "Горизонтальный (768x512)"]
+)
 
 # ---------- КНОПКА ----------
 if st.button("🚀 Сгенерировать контент", type="primary"):
@@ -77,30 +81,40 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
     st.markdown("### 📝 Текст и ключевые слова")
     st.write(output)
 
-    # ------ Генерация изображения (Replicate, опционально) ------
+    # ------ Генерация изображения (Hugging Face, опционально) ------
     if gen_image:
-        if not REPLICATE_TOKEN:
-            st.error("❗ REPLICATE_API_TOKEN отсутствует. Добавь ключ в Secrets, чтобы генерировать изображения.")
-        else:
-            with st.spinner("Генерация изображения (Flux Schnell)..."):
-                try:
-                    final_img_prompt = (image_prompt or topic).strip()
+        with st.spinner("Генерация изображения (Stable Diffusion 2.1 на Hugging Face)..."):
+            try:
+                final_img_prompt = (image_prompt or topic).strip()
 
-                    # Вызов Flux Schnell на Replicate
-                    image_urls = replicate.run(
-                        "black-forest-labs/flux-schnell",
-                        input={"prompt": final_img_prompt}
-                    )
+                # Выбор размера
+                if format_choice == "Квадрат (512x512)":
+                    width, height = 512, 512
+                elif format_choice == "Вертикальный (512x768)":
+                    width, height = 512, 768
+                else:
+                    width, height = 768, 512
 
-                    if isinstance(image_urls, list) and image_urls:
-                        url = image_urls[0]
-                        st.markdown("### 🖼 Сгенерированное изображение")
-                        st.image(url, use_column_width=True, caption="Flux Schnell (Replicate)")
-                        st.link_button("🔗 Открыть изображение", url)
-                    else:
-                        st.warning("Не удалось получить URL изображения. Попробуй уточнить описание.")
-                except Exception as e:
-                    st.error(f"Ошибка генерации изображения: {e}")
+                # Генерация через Hugging Face Inference API
+                response = requests.post(
+                    "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "inputs": final_img_prompt,
+                        "options": {"wait_for_model": True},
+                        "parameters": {"width": width, "height": height},
+                    },
+                )
+
+                if response.status_code == 200:
+                    img = Image.open(BytesIO(response.content))
+                    st.markdown("### 🖼 Сгенерированное изображение")
+                    st.image(img, use_column_width=True, caption="Stable Diffusion 2.1 (Hugging Face)")
+                else:
+                    st.error(f"Ошибка: {response.text}")
+
+            except Exception as e:
+                st.error(f"Ошибка генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Flux Schnell (Replicate). Бесплатный учебный MVP.")
+st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Stable Diffusion 2.1 (Hugging Face). Бесплатный учебный MVP.")
