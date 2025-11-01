@@ -10,7 +10,7 @@ st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
 GROQ_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 REPLICATE_TOKEN = st.secrets.get("REPLICATE_API_TOKEN", os.getenv("REPLICATE_API_TOKEN", ""))
 
-# Проверки ключей (мягко предупреждаем)
+# Проверки ключей
 if not GROQ_KEY:
     st.warning("⚠️ Не найден GROQ_API_KEY. Добавь его в Secrets, иначе текстовая генерация не заработает.")
 if not REPLICATE_TOKEN:
@@ -23,15 +23,17 @@ groq_client = Groq(api_key=GROQ_KEY)
 st.title("🧠 Genova — AI помощник для соцсетей (бесплатная версия)")
 st.markdown("Текст — **Groq (LLaMA 3)**, Изображения — **Stable Diffusion XL (Replicate)**.")
 
-col1, col2 = st.columns([2,1])
+col1, col2 = st.columns([2, 1])
 with col1:
     topic = st.text_input("📝 Тема/задача поста", placeholder="Например: Открытие новой кофейни в центре")
-    sample = st.text_area("📎 Пример поста (по желанию)")
+    sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Можно вставить пример похожего поста...")
 with col2:
+    
+
     platform = st.selectbox("🌐 Платформа", ["Instagram", "VK", "Telegram", "LinkedIn", "YouTube"])
     tone = st.selectbox("🎙️ Тональность", ["Дружелюбный", "Официальный", "Мотивирующий", "Юмористический", "Информационный"])
     length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
-    llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama3-70b-8192", "llama3-8b-8192"])
+    llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama3-70b-8192", "mixtral-8x7b-32768", "gemma-7b-it"])
 
 st.markdown("### 🎨 Визуал")
 gen_image = st.checkbox("Сгенерировать изображение (Stable Diffusion XL)")
@@ -85,16 +87,9 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
             with st.spinner("Генерация изображения (Stable Diffusion XL)..."):
                 try:
                     final_img_prompt = (image_prompt or topic).strip()
-                    # Вызов SDXL на Replicate
                     image_urls = replicate.run(
                         "stability-ai/stable-diffusion-xl-base-1.0",
-                        input={
-                            "prompt": final_img_prompt,
-                            # Доп.параметры можно включить при желании:
-                            # "negative_prompt": "blurry, low quality",
-                            # "width": 768, "height": 768,
-                            # "num_inference_steps": 30, "guidance_scale": 7.5,
-                        }
+                        input={"prompt": final_img_prompt}
                     )
                     if isinstance(image_urls, list) and image_urls:
                         url = image_urls[0]
