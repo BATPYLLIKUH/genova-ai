@@ -1,97 +1,105 @@
 import os
-import requests
-from io import BytesIO
-from PIL import Image
 import streamlit as st
 from groq import Groq
+from huggingface_hub import InferenceClient
+from PIL import Image
+from io import BytesIO
 
-# ---------- НАСТРОЙКИ ----------
+# ------------------------------
+# НАСТРОЙКИ ПРИЛОЖЕНИЯ
+# ------------------------------
 st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
-st.title("🧠 Genova — AI помощник для соцсетей")
+st.title("🧠 Genova — AI помощник для создания контента в соцсетях")
 
-# ---------- КЛЮЧИ API ----------
+# ------------------------------
+# ЗАГРУЗКА СЕКРЕТОВ
+# ------------------------------
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 HF_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", ""))
 
-if not GROQ_API_KEY or not HF_API_KEY:
-    st.error("Добавьте API ключи в Streamlit Secrets.")
+# Проверка ключей
+if not GROQ_API_KEY:
+    st.error("❗ GROQ_API_KEY отсутствует. Добавь его в Secrets.")
+    st.stop()
+if not HF_API_KEY:
+    st.error("❗ HUGGINGFACE_API_KEY отсутствует. Добавь его в Secrets.")
     st.stop()
 
+# Инициализация клиентов
 groq_client = Groq(api_key=GROQ_API_KEY)
+hf_client = InferenceClient(api_key=HF_API_KEY)
 
-# ---------- UI ----------
-topic = st.text_input("📝 Тема поста")
-platform = st.selectbox("🌐 Платформа", ["Instagram", "VK", "Telegram"])
-tone = st.selectbox("🎙️ Тональность", ["Дружелюбный", "Официальный", "Юмористический"])
+# ------------------------------
+# UI — ВВОДНЫЕ ДАННЫЕ
+# ------------------------------
+topic = st.text_input("📝 Тема/задача поста", placeholder="Например: Открытие новой кофейни")
+platform = st.selectbox("🌐 Платформа", ["Instagram", "VK", "Telegram", "LinkedIn", "YouTube"])
+tone = st.selectbox("🎙️ Тональность текста", ["Дружелюбный", "Официальный", "Мотивирующий", "Юмористический", "Информационный"])
 length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
-sample = st.text_area("📎 Пример поста (необязательно)")
+sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Необязательный пример для ориентации модели")
 
-st.markdown("### 🎨 Визуал")
-gen_image = st.checkbox("Сгенерировать изображение")
-image_prompt = st.text_input("Описание изображения")
-format_choice = st.selectbox("Формат:", ["512x512", "768x512", "512x768"])
+# Выбор модели текста
+model_choice = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.1-8b-instant", "mixtral-8x7b-32768"])
 
+# Генерация изображения
+st.markdown("### 🎨 Визуальный контент")
+gen_image = st.checkbox("Хочу сгенерировать изображение")
+image_prompt = st.text_input("Описание изображения (если не заполнить — возьмем тему поста)")
+format_choice = st.selectbox("📐 Формат изображения:", ["512x512", "768x512", "512x768"])
+
+# ------------------------------
+# КНОПКА СТАРТА
+# ------------------------------
 if st.button("🚀 Сгенерировать контент"):
     if not topic:
-        st.warning("Введите тему поста.")
+        st.warning("Пожалуйста, введи тему поста.")
         st.stop()
 
-    # ----- ТЕКСТ -----
-    with st.spinner("Генерация текста..."):
+    # ---------- Генерация текста ----------
+    with st.spinner("Генерация текста с Groq..."):
         try:
-            text_prompt = f"""
-Ты помощник по созданию контента.
-Сгенерируй текст поста по теме "{topic}" для {platform}.
-Тональность: {tone}. Длина: {length} слов.
-Пример поста (если есть): {sample or 'нет примера'}.
+            prompt = f"""
+Ты — помощник по созданию контента для соцсетей.
+Создай текст поста на тему "{topic}".
+Параметры:
+- Платформа: {platform}
+- Тональность: {tone}
+- Длина: {length} слов
+- Пример: {sample or 'нет примера'}
 Верни:
 1) Сам пост
 2) 5–10 хэштегов
-3) Предложение для визуала.
+3) Идею визуала
 """
             chat = groq_client.chat.completions.create(
-                model="llama-3.1-70b-instant",
-                messages=[{"role": "user", "content": text_prompt}]
+                model=model_choice,
+                messages=[{"role": "user", "content": prompt}]
             )
             output = chat.choices[0].message.content
-            st.markdown("### ✅ Текст:")
+            st.markdown("### ✅ Сгенерированный текст и хэштеги:")
             st.write(output)
         except Exception as e:
             st.error(f"Ошибка Groq API: {e}")
 
-    # ----- ИЗОБРАЖЕНИЕ -----
+    # ---------- Генерация изображения ----------
     if gen_image:
-        with st.spinner("Генерация изображения..."):
+        with st.spinner("Генерация изображения с Hugging Face..."):
             try:
-                prompt_for_image = image_prompt or topic
+                img_prompt = image_prompt.strip() or topic
                 width, height = map(int, format_choice.split("x"))
 
-                headers = {
-                    "Authorization": f"Bearer {HF_API_KEY}",
-                    "Content-Type": "application/json",
-                }
-
-                data = {
-                    "inputs": prompt_for_image,
-                    "parameters": {"width": width, "height": height},
-                    "options": {"wait_for_model": True}
-                }
-
-                response = requests.post(
-                    "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-                    headers=headers,
-                    json=data,
+                result = hf_client.text_to_image(
+                    prompt=img_prompt,
+                    model="runwayml/stable-diffusion-v1-5",
+                    width=width,
+                    height=height
                 )
 
-                if response.status_code == 200:
-                    img = Image.open(BytesIO(response.content))
-                    st.markdown("### 🖼 Сгенерированное изображение")
-                    st.image(img, use_column_width=True)
-                else:
-                    st.error(f"Ошибка HuggingFace API: {response.json()}")
-
+                image = Image.open(BytesIO(result)).convert("RGB")
+                st.markdown("### 🖼 Сгенерированное изображение:")
+                st.image(image, use_column_width=True)
             except Exception as e:
                 st.error(f"Ошибка при генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — MVP AI контента для соцсетей (Текст: Groq, Изображения: HuggingFace)")
+st.caption("🚀 Genova — AI MVP для генерации контента. Текст: Groq. Изображения: Hugging Face.")
