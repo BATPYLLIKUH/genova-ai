@@ -21,7 +21,7 @@ groq_client = Groq(api_key=GROQ_KEY)
 
 # ---------- UI ----------
 st.title("🧠 Genova — AI помощник для соцсетей (бесплатная версия)")
-st.markdown("Текст — **Groq (LLaMA 3.3 70B)**, Изображения — **Stable Diffusion XL (Replicate)**.")
+st.markdown("Текст — **Groq (LLaMA 3.3 70B)**, Изображения — **Flux Schnell (Replicate)**.")
 
 col1, col2 = st.columns([2, 1])
 with col1:
@@ -34,7 +34,7 @@ with col2:
     llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma-7b-it"])
 
 st.markdown("### 🎨 Визуал")
-gen_image = st.checkbox("Сгенерировать изображение (Stable Diffusion XL)")
+gen_image = st.checkbox("Сгенерировать изображение (Flux Schnell)")
 image_prompt = st.text_input("Описание изображения (если пусто — возьмём тему поста)", value="")
 
 # ---------- КНОПКА ----------
@@ -82,18 +82,20 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
         if not REPLICATE_TOKEN:
             st.error("❗ REPLICATE_API_TOKEN отсутствует. Добавь ключ в Secrets, чтобы генерировать изображения.")
         else:
-            with st.spinner("Генерация изображения (Stable Diffusion XL)..."):
+            with st.spinner("Генерация изображения (Flux Schnell)..."):
                 try:
                     final_img_prompt = (image_prompt or topic).strip()
-                    # Вызов SDXL на Replicate
+
+                    # Вызов Flux Schnell на Replicate
                     image_urls = replicate.run(
-                        "stability-ai/stable-diffusion-xl-base-1.0",
+                        "black-forest-labs/flux-schnell",
                         input={"prompt": final_img_prompt}
                     )
+
                     if isinstance(image_urls, list) and image_urls:
                         url = image_urls[0]
                         st.markdown("### 🖼 Сгенерированное изображение")
-                        st.image(url, use_column_width=True, caption="Stable Diffusion XL (Replicate)")
+                        st.image(url, use_column_width=True, caption="Flux Schnell (Replicate)")
                         st.link_button("🔗 Открыть изображение", url)
                     else:
                         st.warning("Не удалось получить URL изображения. Попробуй уточнить описание.")
@@ -101,4 +103,4 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
                     st.error(f"Ошибка генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Stable Diffusion XL (Replicate). Бесплатный учебный MVP.")
+st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Flux Schnell (Replicate). Бесплатный учебный MVP.")
