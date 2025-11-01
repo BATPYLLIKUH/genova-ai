@@ -10,17 +10,21 @@ st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
 
 # ---------- КЛЮЧИ ----------
 GROQ_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
+HF_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", ""))
 
-# Проверка
+# Проверка ключей
 if not GROQ_KEY:
     st.warning("⚠️ Не найден GROQ_API_KEY. Добавь его в Secrets, иначе текстовая генерация не заработает.")
+
+if not HF_API_KEY:
+    st.warning("⚠️ Не найден HUGGINGFACE_API_KEY. Добавь его в Secrets, иначе генерация изображений не заработает.")
 
 # ---------- КЛИЕНТЫ ----------
 groq_client = Groq(api_key=GROQ_KEY)
 
 # ---------- UI ----------
 st.title("🧠 Genova — AI помощник для соцсетей (бесплатная версия)")
-st.markdown("Текст — **Groq (LLaMA / Mixtral)**, Изображения — **Stable Diffusion 2.1 (бесплатно через Hugging Face)**.")
+st.markdown("Текст — **Groq (LLaMA / Mixtral)**, Изображения — **Stable Diffusion 2.1 (Hugging Face)**.")
 
 col1, col2 = st.columns([2, 1])
 with col1:
@@ -32,8 +36,9 @@ with col2:
     length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
     llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma-7b-it"])
 
+# Генерация изображения: параметры
 st.markdown("### 🎨 Визуал")
-gen_image = st.checkbox("Сгенерировать изображение (💸 бесплатно через Hugging Face)")
+gen_image = st.checkbox("Сгенерировать изображение")
 image_prompt = st.text_input("Описание изображения (если пусто — возьмём тему поста)", value="")
 
 format_choice = st.selectbox(
@@ -48,22 +53,17 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
         st.stop()
 
     # ------ Генерация текста (Groq) ------
-    if not GROQ_KEY:
-        st.error("Нет GROQ_API_KEY — добавь его в Secrets и перезапусти.")
-        st.stop()
-
     with st.spinner("Генерация текста..."):
         text_prompt = f"""
 Ты — помощник по контенту для соцсетей.
 Сгенерируй текст для {platform}-поста на тему: "{topic}" в тональности "{tone}".
 Объем: около {length} слов.
-Если дан пример — подстрой стиль под него.
-Пример: {sample or "нет примера"}.
+Пример текста: {sample or "нет примера"}.
 
-Выведи строго:
-1) Текст поста (без лишних приветствий)
-2) Список из 5–10 релевантных хэштегов (через пробел или в столбик)
-3) Короткую идею визуала (1–2 предложения)
+Выведи:
+1) Текст поста (без приветствий)
+2) 5–10 хэштегов
+3) Идея визуала (коротко)
 """
         try:
             chat = groq_client.chat.completions.create(
@@ -78,43 +78,50 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
             st.stop()
 
     st.markdown("## ✅ Результаты")
-    st.markdown("### 📝 Текст и ключевые слова")
+    st.markdown("### 📝 Текст и хэштеги")
     st.write(output)
 
-    # ------ Генерация изображения (Hugging Face, опционально) ------
+    # ------ Генерация изображения (Hugging Face) ------
     if gen_image:
-        with st.spinner("Генерация изображения (Stable Diffusion 2.1 на Hugging Face)..."):
-            try:
-                final_img_prompt = (image_prompt or topic).strip()
+        if not HF_API_KEY:
+            st.error("❗ HUGGINGFACE_API_KEY отсутствует. Добавь его в Secrets.")
+        else:
+            with st.spinner("Генерация изображения..."):
+                try:
+                    final_img_prompt = (image_prompt or topic).strip()
 
-                # Выбор размера
-                if format_choice == "Квадрат (512x512)":
-                    width, height = 512, 512
-                elif format_choice == "Вертикальный (512x768)":
-                    width, height = 512, 768
-                else:
-                    width, height = 768, 512
+                    # Выбор размеров
+                    if format_choice == "Квадрат (512x512)":
+                        width, height = 512, 512
+                    elif format_choice == "Вертикальный (512x768)":
+                        width, height = 512, 768
+                    else:
+                        width, height = 768, 512
 
-                # Генерация через Hugging Face Inference API
-                response = requests.post(
-                    "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-                    headers={"Content-Type": "application/json"},
-                    json={
-                        "inputs": final_img_prompt,
-                        "options": {"wait_for_model": True},
-                        "parameters": {"width": width, "height": height},
-                    },
-                )
+                    headers = {
+                        "Authorization": f"Bearer {HF_API_KEY}",
+                        "Content-Type": "application/json",
+                    }
 
-                if response.status_code == 200:
-                    img = Image.open(BytesIO(response.content))
-                    st.markdown("### 🖼 Сгенерированное изображение")
-                    st.image(img, use_column_width=True, caption="Stable Diffusion 2.1 (Hugging Face)")
-                else:
-                    st.error(f"Ошибка: {response.text}")
+                    response = requests.post(
+                        "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
+                        headers=headers,
+                        json={
+                            "inputs": final_img_prompt,
+                            "parameters": {"width": width, "height": height},
+                            "options": {"wait_for_model": True},
+                        },
+                    )
 
-            except Exception as e:
-                st.error(f"Ошибка генерации изображения: {e}")
+                    if response.status_code == 200:
+                        img = Image.open(BytesIO(response.content))
+                        st.markdown("### 🖼 Сгенерированное изображение")
+                        st.image(img, use_column_width=True, caption="По модели Stable Diffusion 2.1")
+                    else:
+                        st.error(f"Ошибка HuggingFace API: {response.text}")
+
+                except Exception as e:
+                    st.error(f"Ошибка при генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Stable Diffusion 2.1 (Hugging Face). Бесплатный учебный MVP.")
+st.caption("🚀 Genova — на Groq + Hugging Face (Stable Diffusion). Полностью бесплатный MVP.")
