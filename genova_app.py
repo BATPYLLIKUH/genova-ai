@@ -14,26 +14,24 @@ REPLICATE_TOKEN = st.secrets.get("REPLICATE_API_TOKEN", os.getenv("REPLICATE_API
 if not GROQ_KEY:
     st.warning("⚠️ Не найден GROQ_API_KEY. Добавь его в Secrets, иначе текстовая генерация не заработает.")
 if not REPLICATE_TOKEN:
-    st.info("ℹ️ REPLICATE_API_TOKEN не задан — генерация изображений будет скрыта.")
+    st.info("ℹ️ REPLICATE_API_TOKEN не задан — генерация изображений может не работать.")
 
 # ---------- КЛИЕНТЫ ----------
 groq_client = Groq(api_key=GROQ_KEY)
 
 # ---------- UI ----------
 st.title("🧠 Genova — AI помощник для соцсетей (бесплатная версия)")
-st.markdown("Текст — **Groq (LLaMA 3)**, Изображения — **Stable Diffusion XL (Replicate)**.")
+st.markdown("Текст — **Groq (LLaMA 3.3 70B)**, Изображения — **Stable Diffusion XL (Replicate)**.")
 
 col1, col2 = st.columns([2, 1])
 with col1:
     topic = st.text_input("📝 Тема/задача поста", placeholder="Например: Открытие новой кофейни в центре")
-    sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Можно вставить пример похожего поста...")
+    sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Можешь вставить текст, под который надо подстроиться...")
 with col2:
-    
-
     platform = st.selectbox("🌐 Платформа", ["Instagram", "VK", "Telegram", "LinkedIn", "YouTube"])
     tone = st.selectbox("🎙️ Тональность", ["Дружелюбный", "Официальный", "Мотивирующий", "Юмористический", "Информационный"])
     length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
-    llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama3-70b-8192", "mixtral-8x7b-32768", "gemma-7b-it"])
+    llm_model = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma-7b-it"])
 
 st.markdown("### 🎨 Визуал")
 gen_image = st.checkbox("Сгенерировать изображение (Stable Diffusion XL)")
@@ -47,10 +45,10 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
 
     # ------ Генерация текста (Groq) ------
     if not GROQ_KEY:
-        st.error("Нет GROQ_API_KEY — добавь в Secrets и перезапусти.")
+        st.error("Нет GROQ_API_KEY — добавь его в Secrets и перезапусти.")
         st.stop()
 
-    with st.spinner("Генерация текста (Groq, LLaMA 3)..."):
+    with st.spinner("Генерация текста..."):
         text_prompt = f"""
 Ты — помощник по контенту для соцсетей.
 Сгенерируй текст для {platform}-поста на тему: "{topic}" в тональности "{tone}".
@@ -87,6 +85,7 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
             with st.spinner("Генерация изображения (Stable Diffusion XL)..."):
                 try:
                     final_img_prompt = (image_prompt or topic).strip()
+                    # Вызов SDXL на Replicate
                     image_urls = replicate.run(
                         "stability-ai/stable-diffusion-xl-base-1.0",
                         input={"prompt": final_img_prompt}
@@ -102,4 +101,4 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
                     st.error(f"Ошибка генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — текст: Groq (LLaMA 3), изображения: Stable Diffusion XL (Replicate). Бесплатный учебный MVP.")
+st.caption("🚀 Genova — текст: Groq (LLaMA 3.3 70B), изображения: Stable Diffusion XL (Replicate). Бесплатный учебный MVP.")
