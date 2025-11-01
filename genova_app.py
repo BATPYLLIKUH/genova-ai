@@ -10,6 +10,7 @@ from io import BytesIO
 # ------------------------------
 st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
 st.title("🧠 Genova — AI помощник для создания контента в соцсетях")
+st.caption("Текст: Groq, Визуал: Hugging Face")
 
 # ------------------------------
 # ЗАГРУЗКА СЕКРЕТОВ
@@ -18,11 +19,8 @@ GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 HF_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", ""))
 
 # Проверка ключей
-if not GROQ_API_KEY:
-    st.error("❗ GROQ_API_KEY отсутствует. Добавь его в Secrets.")
-    st.stop()
-if not HF_API_KEY:
-    st.error("❗ HUGGINGFACE_API_KEY отсутствует. Добавь его в Secrets.")
+if not GROQ_API_KEY or not HF_API_KEY:
+    st.error("❗ Добавьте API ключи в Streamlit Secrets (GROQ_API_KEY и HUGGINGFACE_API_KEY)")
     st.stop()
 
 # Инициализация клиентов
@@ -36,7 +34,7 @@ topic = st.text_input("📝 Тема/задача поста", placeholder="На
 platform = st.selectbox("🌐 Платформа", ["Instagram", "VK", "Telegram", "LinkedIn", "YouTube"])
 tone = st.selectbox("🎙️ Тональность текста", ["Дружелюбный", "Официальный", "Мотивирующий", "Юмористический", "Информационный"])
 length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
-sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Необязательный пример для ориентации модели")
+sample = st.text_area("📎 Пример поста (по желанию)", placeholder="Необязательно: можно вставить пример текста")
 
 # Выбор модели текста
 model_choice = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.1-8b-instant", "mixtral-8x7b-32768"])
@@ -44,19 +42,19 @@ model_choice = st.selectbox("🧠 Модель текста (Groq)", ["llama-3.1
 # Генерация изображения
 st.markdown("### 🎨 Визуальный контент")
 gen_image = st.checkbox("Хочу сгенерировать изображение")
-image_prompt = st.text_input("Описание изображения (если не заполнить — возьмем тему поста)")
+image_prompt = st.text_input("Описание изображения (если не заполнить — возьмём тему поста)")
 format_choice = st.selectbox("📐 Формат изображения:", ["512x512", "768x512", "512x768"])
 
 # ------------------------------
-# КНОПКА СТАРТА
+# КНОПКА ГЕНЕРАЦИИ
 # ------------------------------
 if st.button("🚀 Сгенерировать контент"):
     if not topic:
-        st.warning("Пожалуйста, введи тему поста.")
+        st.warning("❗ Введите тему поста.")
         st.stop()
 
-    # ---------- Генерация текста ----------
-    with st.spinner("Генерация текста с Groq..."):
+    # ---------- 1. Генерация текста ----------
+    with st.spinner("⚙️ Генерация текста через Groq..."):
         try:
             prompt = f"""
 Ты — помощник по созданию контента для соцсетей.
@@ -76,30 +74,35 @@ if st.button("🚀 Сгенерировать контент"):
                 messages=[{"role": "user", "content": prompt}]
             )
             output = chat.choices[0].message.content
-            st.markdown("### ✅ Сгенерированный текст и хэштеги:")
+            st.markdown("### ✅ Текст и хэштеги")
             st.write(output)
         except Exception as e:
-            st.error(f"Ошибка Groq API: {e}")
+            st.error(f"🔴 Ошибка Groq API: {e}")
 
-    # ---------- Генерация изображения ----------
+    # ---------- 2. Генерация изображения ----------
     if gen_image:
-        with st.spinner("Генерация изображения с Hugging Face..."):
+        with st.spinner("🖼 Генерация изображения через Hugging Face..."):
             try:
                 img_prompt = image_prompt.strip() or topic
                 width, height = map(int, format_choice.split("x"))
 
-                result = hf_client.text_to_image(
-                    prompt=img_prompt,
-                    model="runwayml/stable-diffusion-v1-5",
-                    width=width,
-                    height=height
+                result = hf_client.post(
+                    model="stabilityai/stable-diffusion-2",
+                    inputs=img_prompt,
+                    parameters={"width": width, "height": height},
+                    options={"wait_for_model": True}
                 )
 
-                image = Image.open(BytesIO(result)).convert("RGB")
-                st.markdown("### 🖼 Сгенерированное изображение:")
-                st.image(image, use_column_width=True)
+                if isinstance(result, bytes):
+                    image = Image.open(BytesIO(result)).convert("RGB")
+                    st.markdown("### 🖼 Сгенерированное изображение")
+                    st.image(image, use_column_width=True)
+                else:
+                    st.error("❌ API не вернул изображение, вот полный ответ сервера:")
+                    st.json(result)
+
             except Exception as e:
-                st.error(f"Ошибка при генерации изображения: {e}")
+                st.error(f"🔴 Ошибка при генерации изображения: {e}")
 
 st.markdown("---")
-st.caption("🚀 Genova — AI MVP для генерации контента. Текст: Groq. Изображения: Hugging Face.")
+st.caption("© 2025 — Genova AI MVP. Создано для демонстрации возможностей LLM.")
