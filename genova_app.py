@@ -22,12 +22,12 @@ st.caption("Текст: Groq (бесплатно) или OpenAI (ChatGPT, пла
 # ------------------------------
 GROQ_API_KEY      = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 OPENAI_API_KEY    = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-HF_API_KEY        = st.secrets.get("HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", ""))
+HUGGINGFACE_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", ""))
 
 # Клиенты создадим лениво (когда понадобятся)
 groq_client   = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-hf_client     = InferenceClient(api_key=HF_API_KEY) if HF_API_KEY else None
+hf_client     = InferenceClient(api_key=HUGGINGFACE_API_KEY) if HUGGINGFACE_API_KEY else None
 
 # ------------------------------
 # UI — ВХОДНЫЕ ДАННЫЕ
@@ -67,7 +67,16 @@ image_provider = st.radio(
     horizontal=True
 )
 
-img_format = st.selectbox("📐 Формат изображения", ["512x512", "768x512", "512x768"])
+# Выбор формата в зависимости от модели
+if image_provider == "OpenAI DALL·E 3 (платно)":
+    img_format = st.selectbox("📐 Формат изображения", [
+        "1024x1024 (квадрат)",
+        "1024x1792 (вертикальное)",
+        "1792x1024 (горизонтальное)"
+    ])
+else:
+    img_format = st.selectbox("📐 Формат изображения", ["512x512", "768x512", "512x768"])
+
 
 # ------------------------------
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -92,14 +101,12 @@ def generate_text_openai(model: str, prompt: str) -> str:
         temperature=0.7,
         max_tokens=900,
     )
-    # для клиента v1 доступ через .message.content
     return resp.choices[0].message.content
 
 def generate_image_hf(prompt: str, size: str) -> Image.Image:
     if not hf_client:
         raise RuntimeError("HUGGINGFACE_API_KEY отсутствует в Secrets.")
     w, h = map(int, size.split("x"))
-    # стабильная открытая модель SD2
     result = hf_client.text_to_image(
         model="stabilityai/stable-diffusion-2",
         prompt=prompt,
@@ -111,26 +118,24 @@ def generate_image_hf(prompt: str, size: str) -> Image.Image:
 def generate_image_openai(prompt: str, size: str) -> Image.Image:
     if not openai_client:
         raise RuntimeError("OPENAI_API_KEY отсутствует в Secrets.")
-    # маппинг размера в формат OpenAI
-    size_map = {"512x512": "512x512", "768x512": "768x512", "512x768": "512x768"}
-    oa_size = size_map.get(size, "512x512")
+
+    size_map = {
+        "1024x1024 (квадрат)": "1024x1024",
+        "1024x1792 (вертикальное)": "1024x1792",
+        "1792x1024 (горизонтальное)": "1792x1024"
+    }
+    oa_size = size_map.get(size)
+    if not oa_size:
+        raise ValueError(f"Недопустимый размер изображения для DALL·E 3: {size}")
+
     resp = openai_client.images.generate(
         model="dall-e-3",
         prompt=prompt,
         size=oa_size
     )
-    # пробуем b64_json; если вернулся url — тоже обработаем
     data = resp.data[0]
-    if getattr(data, "b64_json", None):
-        img_bytes = base64.b64decode(data.b64_json)
-        return Image.open(BytesIO(img_bytes)).convert("RGB")
-    elif getattr(data, "url", None):
-        # Streamlit сам подтянет по URL, но вернём "заглушку" (строка) как исключение
-        # Лучше сразу показать URL:
-        st.image(data.url, use_column_width=True, caption="DALL·E 3 (URL)")
-        return None
-    else:
-        raise RuntimeError("Не удалось получить изображение от OpenAI Images API.")
+    img_bytes = base64.b64decode(data.b64_json)
+    return Image.open(BytesIO(img_bytes)).convert("RGB")
 
 # ------------------------------
 # КНОПКА: СГЕНЕРИРОВАТЬ
@@ -173,18 +178,13 @@ if st.button("🚀 Сгенерировать контент", type="primary"):
             final_prompt = (image_desc or topic).strip()
             try:
                 if image_provider == "Hugging Face (бесплатно)":
-                    if not HF_API_KEY:
-                        raise RuntimeError("Нужен HUGGINGFACE_API_KEY в Secrets для генерации через Hugging Face.")
                     img = generate_image_hf(final_prompt, img_format)
                     st.subheader("🖼 Сгенерированное изображение (Hugging Face)")
                     st.image(img, use_column_width=True)
                 else:
-                    if not OPENAI_API_KEY:
-                        raise RuntimeError("Нужен OPENAI_API_KEY в Secrets для DALL·E 3.")
                     img = generate_image_openai(final_prompt, img_format)
-                    if img is not None:
-                        st.subheader("🖼 Сгенерированное изображение (DALL·E 3)")
-                        st.image(img, use_column_width=True)
+                    st.subheader("🖼 Сгенерированное изображение (DALL·E 3)")
+                    st.image(img, use_column_width=True)
             except Exception as e:
                 st.error(f"🔴 Ошибка генерации изображения: {e}")
 
