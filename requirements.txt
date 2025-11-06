@@ -1,4 +1,5 @@
 streamlit
 groq
+openai
 huggingface_hub
 pillow
