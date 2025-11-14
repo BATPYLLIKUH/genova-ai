@@ -1,178 +1,178 @@
 import os
+import time
 import base64
-from io import BytesIO
-from PIL import Image
-
+import requests
 import streamlit as st
 from groq import Groq
 from openai import OpenAI
-from huggingface_hub import InferenceClient
+from io import BytesIO
+from PIL import Image
+
+# ----------------- Настройки страницы -----------------
+st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
+
+st.title("🧠 Genova — AI помощник для генерации контента")
+st.caption("Создание текста, ключевых слов и изображений под соцсети")
 
 
-# ---------- НАСТРОЙКИ ----------
-st.set_page_config(
-    page_title="Genova AI — Генератор контента",
-    page_icon="🧠",
-    layout="wide"
-)
+# ----------------- Ключи -----------------
+GROQ_KEY = st.secrets.get("GROQ_API_KEY", "")
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+FB_KEY = st.secrets.get("FUSIONBRAIN_API_KEY", "")
+FB_SECRET = st.secrets.get("FUSIONBRAIN_SECRET", "")
 
-# ---------- API КЛЮЧИ ----------
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-HUGGINGFACE_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", "")
-
-# Инициализация API-клиентов
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-hf_client = InferenceClient(token=HUGGINGFACE_API_KEY) if HUGGINGFACE_API_KEY else None
+groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
+openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 
-# ---------- UI: ШАПКА ----------
-st.title("🧠 Genova AI — генератор текста и визуала для соцсетей")
-st.markdown("Создай **текст, хэштеги и изображение** одним кликом.")
+# ----------------- ФУНКЦИЯ: FusionBrain -----------------
+def generate_image_fusionbrain(prompt: str, width=512, height=512):
+    if not FB_KEY or not FB_SECRET:
+        raise RuntimeError("FusionBrain ключи не найдены.")
 
-# ---------- UI: ВВОД ДАННЫХ ----------
-topic = st.text_input("📝 Тема поста", placeholder="Например: Открытие новой кофейни в центре")
+    url = "https://api.fusionbrain.ai/key/api/v1/text2image/run"
 
-# ⚠️ Обновлённый список платформ
+    headers = {
+        "X-Key": f"Key {FB_KEY}",
+        "X-Secret": f"Secret {FB_SECRET}"
+    }
+
+    data = {
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "num_steps": 30
+    }
+
+    resp = requests.post(url, json=data, headers=headers).json()
+
+    if "uuid" not in resp:
+        raise RuntimeError(f"Ошибка запуска FusionBrain: {resp}")
+
+    task_id = resp["uuid"]
+    result_url = f"https://api.fusionbrain.ai/key/api/v1/text2image/result?uuid={task_id}"
+
+    for _ in range(40):
+        result = requests.get(result_url).json()
+        if result.get("status") == "DONE":
+            img_bytes = base64.b64decode(result["images"][0])
+            return Image.open(BytesIO(img_bytes))
+        time.sleep(0.5)
+
+    raise RuntimeError("FusionBrain: превышено время ожидания.")
+
+
+# ----------------- UI -----------------
+st.subheader("📝 Параметры текста")
+
+topic = st.text_input("Тема поста", placeholder="Например: Открытие нового бара...")
 platform = st.selectbox("🌐 Платформа", ["TikTok", "Instagram", "VK", "Telegram", "YouTube"])
+tone = st.selectbox("🎙️ Тональность", ["Дружелюбная", "Официальная", "Мотивирующая", "Юмористическая", "Информационная"])
+length = st.slider("📏 Объём текста (слов)", 50, 400, 120)
+sample = st.text_area("📎 Пример поста (необязательно)")
 
-tone = st.selectbox("🎙️ Тональность", ["Дружелюбный", "Официальный", "Мотивирующий", "Юмористический", "Информационный"])
-length = st.slider("📏 Объем текста (слов):", 50, 400, 120)
-sample = st.text_area("📎 Пример поста (по желанию)")
-
-# ---------- ВЫБОР МОДЕЛИ ДЛЯ ТЕКСТА ----------
-st.markdown("### 🤖 Модель для текста")
+# --- выбор модели текста ---
 text_model = st.selectbox(
-    "Выбери, как генерировать текст",
-    ["Groq (бесплатно, LLaMA 3.1)", "OpenAI GPT (платно, GPT-4o)"]
+    "🧠 Модель для текста",
+    ["🆓 Groq — LLaMA 3.1 (рекомендуется)", "💎 OpenAI GPT-4o mini"]
 )
 
-# ---------- БЛОК ИЗОБРАЖЕНИЙ ----------
-st.markdown("### 🎨 Визуальное оформление")
 
-gen_image = st.checkbox("Сгенерировать изображение")
-image_provider = st.selectbox(
-    "Провайдер изображения",
-    ["Hugging Face (бесплатно, Stable Diffusion 2.1)", "OpenAI DALL·E 3 (платно)"]
+# ---- блок изображений ----
+st.subheader("🎨 Генерация изображения")
+
+gen_image = st.checkbox("Создать изображение")
+
+image_model = st.selectbox(
+    "🎨 Провайдер изображения",
+    ["🆓 FusionBrain", "💎 OpenAI DALL·E 3"]
 )
 
-# Для HF — произвольные размеры; для DALL·E 3 — позже можно добавить поддерживаемые размеры
-img_format = st.selectbox("📐 Формат изображения", [
-    "512x512",
-    "768x512",
-    "512x768"
-])
-image_desc = st.text_input("Текстовый запрос для изображения", placeholder="Например: A neon futuristic city at night with flying cars")
+image_prompt = st.text_input("Описание картинки", placeholder="Если пусто — используем тему поста")
 
 
-# ---------- ГЕНЕРАЦИЯ ТЕКСТА ----------
-def generate_text_groq(prompt: str) -> str:
-    if not groq_client:
-        raise RuntimeError("GROQ_API_KEY отсутствует в Secrets.")
-    chat_resp = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-    )
-    return chat_resp.choices[0].message.content
-
-
-def generate_text_openai(prompt: str) -> str:
-    if not openai_client:
-        raise RuntimeError("OPENAI_API_KEY отсутствует в Secrets.")
-    chat = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return chat.choices[0].message.content
-
-
-# ---------- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ (HF) ----------
-def generate_image_hf(prompt: str, user_size: str) -> Image.Image:
-    """
-    Генерация картинки через Hugging Face:
-    1) генерируем 512x512 (максимально совместимо для бесплатного Inference),
-    2) локально масштабируем под выбранный размер.
-    """
-    if not hf_client:
-        raise RuntimeError("HUGGINGFACE_API_KEY отсутствует в Secrets.")
-    try:
-        raw_bytes = hf_client.text_to_image(
-            model="stabilityai/stable-diffusion-2-1",
-            prompt=prompt,
-            width=512,
-            height=512
-        )
-        img = Image.open(BytesIO(raw_bytes)).convert("RGB")
-        target_w, target_h = map(int, user_size.split("x"))
-        if (target_w, target_h) != (512, 512):
-            img = img.resize((target_w, target_h), Image.LANCZOS)
-        return img
-    except Exception as e:
-        raise RuntimeError(f"HF error: {e}")
-
-
-# ---------- КНОПКА: СГЕНЕРИРОВАТЬ ----------
-if st.button("🚀 Сгенерировать контент", type="primary"):
+# ----------------- Кнопка -----------------
+if st.button("🚀 Сгенерировать"):
     if not topic:
-        st.warning("🔔 Пожалуйста, введи тему поста.")
+        st.error("Введите тему поста.")
         st.stop()
 
-    # ------ Генерация текста ------
-    with st.spinner("⚙️ Генерация текста..."):
-        # Небольшая адаптация под платформы
-        platform_hint = {
-            "TikTok": "Сфокусируйся на коротких, цепляющих фразах и сценарии для видео.",
-            "Instagram": "Добавь эмодзи и call-to-action. Можно 3-5 хэштегов в тексте.",
-            "VK": "Строй текст информативно, 3–7 хэштегов в конце.",
-            "Telegram": "Пиши лаконично, без лишних украшений, можно списком.",
-            "YouTube": "Сделай лид-абзац и добавь идеи для описания/тегов."
-        }[platform]
+    # ---------- Генерация текста ----------
+    st.subheader("📄 Результат")
 
+    with st.spinner("Генерация текста..."):
         text_prompt = f"""
-Ты — помощник по контенту для соцсетей.
-Платформа: {platform}. {platform_hint}
+Ты — AI, который пишет тексты для соцсетей.
+Платформа: {platform}
 Тональность: {tone}
-Объем: около {length} слов.
+Объём: около {length} слов
 Тема: {topic}
-Пример для стилизации: {sample or "нет примера"}.
+Пример: {sample or "нет"}
 
-Верни строго:
-1) Текст поста (без приветствий)
-2) 5–10 релевантных хэштегов
-3) Короткую идею визуала (1–2 предложения)
+Сгенерируй:
+1) Сам текст поста
+2) Список ключевых слов/хэштегов (5–10)
+3) Идею визуала (1–2 предложения)
 """
 
-        try:
-            if text_model.startswith("Groq"):
-                text_output = generate_text_groq(text_prompt)
-            else:
-                text_output = generate_text_openai(text_prompt)
-        except Exception as e:
-            st.error(f"❌ Ошибка генерации текста: {e}")
-            st.stop()
+        # Модель Groq
+        if text_model.startswith("🆓"):
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{"role": "user", "content": text_prompt}]
+                )
+                text_output = response.choices[0].message.content
+            except Exception as e:
+                text_output = f"Ошибка Groq: {e}"
 
-    st.markdown("## ✅ Результат")
-    st.markdown("### 📝 Текст и хэштеги")
+        # Модель OpenAI
+        else:
+            if not OPENAI_KEY:
+                text_output = "❌ Нет OpenAI KEY"
+            else:
+                try:
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": text_prompt}]
+                    )
+                    text_output = response.choices[0].message.content
+                except Exception as e:
+                    text_output = f"Ошибка OpenAI: {e}"
+
     st.write(text_output)
 
-    # ------ Генерация изображения ------
+    # ---------- Генерация изображения ----------
     if gen_image:
-        final_prompt = (image_desc or topic).strip()
-        if not final_prompt:
-            st.error("❌ Описание изображения пустое.")
-        else:
-            with st.spinner("🖼 Генерация изображения..."):
-                try:
-                    if image_provider.startswith("Hugging Face"):
-                        img = generate_image_hf(final_prompt, img_format)
-                        st.subheader("🖼 Сгенерированное изображение (Hugging Face)")
-                        st.image(img, use_column_width=True)
-                    else:
-                        st.info("DALL·E 3 пока отключён (нужна оплата в OpenAI). Выбери Hugging Face для бесплатной генерации.")
-                except Exception as e:
-                    st.error(f"🔴 Ошибка генерации изображения: {e}")
+        final_img_prompt = image_prompt or topic
 
+        with st.spinner("Генерация изображения..."):
+
+            # FusionBrain
+            if image_model.startswith("🆓"):
+                try:
+                    img = generate_image_fusionbrain(final_img_prompt)
+                    st.image(img, caption="FusionBrain")
+                except Exception as e:
+                    st.error(f"FusionBrain ошибка: {e}")
+
+            # DALL·E 3
+            else:
+                if not OPENAI_KEY:
+                    st.error("Нет OPENAI_API_KEY")
+                else:
+                    try:
+                        resp = openai_client.images.generate(
+                            model="gpt-image-1",
+                            prompt=final_img_prompt,
+                            size="1024x1024"
+                        )
+                        img_base64 = resp.data[0].b64_json
+                        img_bytes = base64.b64decode(img_base64)
+                        st.image(Image.open(BytesIO(img_bytes)), caption="OpenAI DALL·E 3")
+                    except Exception as e:
+                        st.error(f"OpenAI ошибка: {e}")
+
+# ---- Footer ----
 st.markdown("---")
-st.caption("🚀 Genova — текст: Groq/OpenAI, визуал: Hugging Face. Платформы: TikTok, Instagram, VK, Telegram, YouTube.")
+st.caption("Genova — AI MVP для генерирования контента в соцсетях")
