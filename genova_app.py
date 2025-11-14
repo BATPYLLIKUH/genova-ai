@@ -1,189 +1,93 @@
-import os
+import streamlit as st
+import requests
 import time
 import base64
-import requests
-import streamlit as st
-from groq import Groq
-from openai import OpenAI
 from io import BytesIO
 from PIL import Image
 
-# ----------------- Настройки страницы -----------------
-st.set_page_config(page_title="Genova AI", page_icon="🧠", layout="wide")
-
-st.title("🧠 Genova — AI генератор контента")
-st.caption("Тексты + изображения (FusionBrain / DALL·E 3)")
-
-
-# ----------------- Ключи -----------------
-GROQ_KEY = st.secrets.get("GROQ_API_KEY", "")
-OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
-
+# ==============================
+# FusionBrain: читаем ключи
+# ==============================
 FB_KEY = st.secrets.get("FUSIONBRAIN_API_KEY", "")
-FB_SECRET = st.secrets.get("FUSIONBRAIN_SECRET", "")
+FB_SECRET = st.secrets.get("FUSIONBRAIN_API_SECRET", "")
 
-groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
-openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
+HEADERS = {
+    "X-Key": f"Key {FB_KEY}",
+    "X-Secret": f"Secret {FB_SECRET}"
+}
 
+# ==============================
+# Функция генерации изображения
+# ==============================
+def generate_fusionbrain(prompt: str):
+    run_url = "https://api-key.fusionbrain.ai/key/api/v1/pipeline/run"
 
-# ----------------- FusionBrain DEBUG-ФУНКЦИЯ -----------------
-def fusionbrain_generate_debug(prompt: str):
-
-    url = "https://api.fusionbrain.ai/key/api/v1/text2image/run"
-
-    headers = {
-        "X-Key": f"Key {FB_KEY}",
-        "X-Secret": f"Secret {FB_SECRET}"
+    payload = {
+        "type": "GENERATE",
+        "numImages": 1,
+        "width": 1024,
+        "height": 1024,
+        "generateParams": {
+            "query": prompt,
+            "steps": 30
+        }
     }
 
-    data = {
-        "prompt": prompt,
-        "width": 512,
-        "height": 512,
-        "num_steps": 30
-    }
+    # ---- Запуск генерации ----
+    run_resp = requests.post(run_url, headers=HEADERS, json=payload)
 
-    # -----------------------
-    # 1) Первый запрос — запуск задачи
-    # -----------------------
-    raw = requests.post(url, json=data, headers=headers)
-
-    st.write("### 🟦 FusionBrain RAW response (run)")
-    st.code(raw.text)
-
-    # Если ответ не JSON — пишем ошибку
+    # Проверяем JSON
     try:
-        resp = raw.json()
-    except:
-        raise RuntimeError("FusionBrain вернул НЕ JSON. Это обычно означает: неверные ключи или формат заголовков.")
+        run_json = run_resp.json()
+    except Exception:
+        raise RuntimeError(f"[RUN] FusionBrain вернул НЕ JSON:\n\n{run_resp.text}")
 
-    if "uuid" not in resp:
-        raise RuntimeError(f"Ошибка запуска FusionBrain: {resp}")
+    if "uuid" not in run_json:
+        raise RuntimeError(f"[RUN ERROR] Ответ FusionBrain:\n{run_json}")
 
-    task_id = resp["uuid"]
+    task_id = run_json["uuid"]
 
-    # -----------------------
-    # 2) Ждём результат
-    # -----------------------
-    result_url = f"https://api.fusionbrain.ai/key/api/v1/text2image/result?uuid={task_id}"
-
-    st.write("### ⏳ FusionBrain ожидаем результат...")
+    # ---- Проверяем статус ----
+    status_url = f"https://api-key.fusionbrain.ai/key/api/v1/pipeline/status/{task_id}"
 
     for _ in range(60):
-        result_raw = requests.get(result_url)
-
-        st.write("### 🟩 FusionBrain RAW response (result)")
-        st.code(result_raw.text)
+        status_resp = requests.get(status_url, headers=HEADERS)
 
         try:
-            result = result_raw.json()
+            status_json = status_resp.json()
         except:
-            raise RuntimeError("FusionBrain result вернул не JSON.")
+            raise RuntimeError(f"[STATUS] НЕ JSON:\n\n{status_resp.text}")
 
-        if result.get("status") == "DONE":
-            img_bytes = base64.b64decode(result["images"][0])
+        if status_json.get("status") == "DONE":
+            images = status_json.get("images", [])
+            if not images:
+                raise RuntimeError("[STATUS] Пустой список images.")
+
+            # Декодируем изображение
+            img_bytes = base64.b64decode(images[0])
             return Image.open(BytesIO(img_bytes))
 
-        time.sleep(0.5)
+        time.sleep(1)
 
-    raise RuntimeError("FusionBrain: задача слишком долго обрабатывается")
-
-
-# ----------------- UI -----------------
-st.subheader("📝 Параметры текста")
-
-topic = st.text_input("Тема поста")
-platform = st.selectbox("Платформа", ["TikTok", "Instagram", "VK", "Telegram", "YouTube"])
-tone = st.selectbox("Тональность", ["Дружелюбная", "Официальная", "Мотивирующая", "Юмористическая", "Информационная"])
-length = st.slider("Объём (слов):", 50, 400, 120)
-sample = st.text_area("Пример поста (опционально)")
-
-text_model = st.selectbox(
-    "🧠 Модель текста",
-    ["🆓 Groq — LLaMA 3.1", "💎 OpenAI GPT-4o mini"]
-)
-
-st.subheader("🎨 Генерация изображения")
-gen_image = st.checkbox("Создать изображение")
-
-image_model = st.selectbox(
-    "🎨 Провайдер",
-    ["🆓 FusionBrain", "💎 OpenAI DALL·E 3"]
-)
-
-image_prompt = st.text_input("Описание изображения")
+    raise RuntimeError("FusionBrain: превышено время ожидания результата.")
 
 
-# ----------------- Генерация -----------------
-if st.button("🚀 Сгенерировать"):
-    if not topic:
-        st.error("Введите тему!")
+# ==============================
+# UI
+# ==============================
+st.title("🖼 FusionBrain генератор изображения")
+
+prompt = st.text_input("Описание изображения", placeholder="космическая станция на фоне туманности")
+
+if st.button("Сгенерировать"):
+    if not prompt.strip():
+        st.error("Введите текстовое описание.")
         st.stop()
 
-    # ---------- ТЕКСТ ----------
-    st.subheader("📄 Текст")
+    try:
+        st.info("⏳ Генерация… ожидаем ответ FusionBrain...")
+        image = generate_fusionbrain(prompt)
+        st.image(image, caption="Результат FusionBrain", use_column_width=True)
 
-    text_prompt = f"""
-Платформа: {platform}
-Тональность: {tone}
-Длина: {length} слов
-Тема: {topic}
-Пример: {sample or "нет"}
-
-Сгенерируй:
-1) Текст поста
-2) 5-10 хэштегов
-3) Идею визуала
-"""
-
-    with st.spinner("Генерация текста..."):
-
-        if text_model.startswith("🆓"):
-            response = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": text_prompt}]
-            )
-            text_output = response.choices[0].message.content
-
-        else:
-            if not OPENAI_KEY:
-                text_output = "❌ NET OPENAI KEY"
-            else:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": text_prompt}]
-                )
-                text_output = response.choices[0].message.content
-
-    st.write(text_output)
-
-    # ---------- ИЗОБРАЖЕНИЕ ----------
-    if gen_image:
-        st.subheader("🖼 Изображение")
-
-        final_prompt = image_prompt or topic
-
-        if image_model.startswith("🆓"):
-            try:
-                img = fusionbrain_generate_debug(final_prompt)
-                st.image(img, caption="FusionBrain")
-            except Exception as e:
-                st.error(f"FusionBrain ошибка: {e}")
-
-        else:
-            if not OPENAI_KEY:
-                st.error("Нет OpenAI ключа")
-            else:
-                try:
-                    res = openai_client.images.generate(
-                        model="gpt-image-1",
-                        prompt=final_prompt,
-                        size="1024x1024"
-                    )
-                    img_bytes = base64.b64decode(res.data[0].b64_json)
-                    st.image(Image.open(BytesIO(img_bytes)), caption="DALL·E 3")
-                except Exception as e:
-                    st.error(f"OpenAI ошибка: {e}")
-
-st.markdown("---")
-st.caption("Genova AI — MVP для генерации контента")
+    except Exception as e:
+        st.error(f"❌ Ошибка FusionBrain:\n\n{e}")
